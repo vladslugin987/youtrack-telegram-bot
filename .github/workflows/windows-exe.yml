@@ -21,9 +21,13 @@ jobs:
       - name: Cache Gradle
         uses: gradle/actions/setup-gradle@v3
 
+      - name: Install Gradle (Chocolatey)
+        shell: powershell
+        run: choco install gradle -y
+
       - name: Build fat jar
-        run: ./gradlew --no-daemon clean shadowJar
-        shell: bash
+        shell: powershell
+        run: gradle --no-daemon clean shadowJar
 
       - name: Create EXE with jpackage
         shell: bash
