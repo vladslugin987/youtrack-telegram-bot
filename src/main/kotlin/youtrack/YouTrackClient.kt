@@ -20,7 +20,7 @@ class YouTrackClient(
     
     // Fetch notifications from YouTrack API
     fun getNotifications(): List<Notification> {
-        val url = "${baseUrl.trimEnd('/')}/api/users/notifications?fields=id,content,metadata"
+        val url = "${baseUrl.trimEnd('/')}/api/users/me/notifications?fields=id,content,metadata"
 
         val request = Request.Builder()
             .url(url)
