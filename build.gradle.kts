@@ -1,6 +1,7 @@
 plugins {
     kotlin("jvm") version "2.2.20"
     application
+    id("com.github.johnrengelman.shadow") version "8.1.1"
 }
 
 group = "com.youtrack.bot"
@@ -33,4 +34,9 @@ dependencies {
 
 application {
     mainClass.set("MainKt")
+}
+
+// Configure Shadow to build a fat jar
+tasks.named<com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar>("shadowJar") {
+    archiveClassifier.set("all")
 }
