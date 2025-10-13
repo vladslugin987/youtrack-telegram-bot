@@ -21,10 +21,12 @@ fun main(): Unit = runBlocking {
     bot.startPolling()
 
     val sent = mutableSetOf<String>()
+    var messageCount = 0
 
     while (true) {
         try {
             val notifications = ytClient.getNotifications()
+            println("Fetched ${notifications.size} notifications")
             
             for (n in notifications) {
                 if (sent.add(n.id)) {
@@ -34,10 +36,17 @@ fun main(): Unit = runBlocking {
                         text = message,
                         parseMode = ParseMode.MARKDOWN
                     )
+                    messageCount++
+                    println("Sent notification #${messageCount}: ${n.id}")
                 }
+            }
+            if (sent.size > 1000) {
+                sent.clear()
+                println("Cleared sent cache")
             }
         } catch (e: Exception) {
             println("Error: ${e.message}")
+            e.printStackTrace()
         }
 
         delay(pollInterval * 1000)
