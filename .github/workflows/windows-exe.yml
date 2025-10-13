@@ -21,9 +21,14 @@ jobs:
       - name: Cache Gradle
         uses: gradle/actions/setup-gradle@v3
 
+      - name: Remove preinstalled Gradle
+        shell: powershell
+        continue-on-error: true
+        run: choco uninstall gradle -y
+
       - name: Install Gradle 8.7 (Chocolatey)
         shell: powershell
-        run: choco install gradle --version=8.7 -y
+        run: choco install gradle --version=8.7 -y --allow-downgrade --force
 
       - name: Build fat jar
         shell: powershell
