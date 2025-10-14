@@ -1,5 +1,6 @@
 youtrack.url=https://your-instance.youtrack.cloud
 youtrack.token=YOUR_YOUTRACK_TOKEN
+youtrack.projectId=0-0
 telegram.token=YOUR_TELEGRAM_BOT_TOKEN
 telegram.chatId=YOUR_CHAT_ID
 polling.interval=60
