@@ -8,6 +8,12 @@ Internship task for JetBrains Internship 2025-2026 (project "YouTrack Integratio
 
 Bot for integrating YouTrack with Telegram. Sends notifications from YouTrack and allows creating issues directly from the messenger.
 
+## Demo
+
+[![Watch Demo](https://img.youtube.com/vi/IHGkljvpUqQ/maxresdefault.jpg)](https://youtu.be/IHGkljvpUqQ)
+
+[Watch on YouTube](https://youtu.be/IHGkljvpUqQ)
+
 ## Implementation
 
 **Part 1 - Notifications**
