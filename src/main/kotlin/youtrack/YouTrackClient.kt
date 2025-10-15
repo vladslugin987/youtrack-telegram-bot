@@ -20,7 +20,7 @@ class YouTrackClient(
 ) {
     private val client = OkHttpClient()
     private val gson = Gson()
-    
+
     fun getNotifications(): List<Notification> {
         val url = "${baseUrl.trimEnd('/')}/api/users/me/notifications?fields=id,content,metadata"
 
@@ -31,16 +31,16 @@ class YouTrackClient(
             .build()
 
         val response = client.newCall(request).execute()
-        
         if (!response.isSuccessful) {
-            throw IllegalStateException("YouTrack returned ${response.code}")
+            throw IllegalStateException("YouTrack API error: ${response.code}")
         }
 
-        val body = response.body?.string() ?: return emptyList()
+        val body = response.body?.string()
+        if (body == null) return emptyList()
+
         val root = gson.fromJson(body, JsonElement::class.java)
-        
         if (!root.isJsonArray) return emptyList()
-        
+
         val notifications = mutableListOf<Notification>()
         for (element in root.asJsonArray) {
             val notif = parseNotification(element)
@@ -48,59 +48,107 @@ class YouTrackClient(
                 notifications.add(notif)
             }
         }
-        
+
         return notifications
     }
 
     private fun parseNotification(element: JsonElement): Notification? {
         if (!element.isJsonObject) return null
-        
+
         val obj = element.asJsonObject
         val id = obj.get("id")?.asString ?: return null
+
+        // content might be base64+gzip encoded
         val contentRaw = obj.get("content")
-        
-        // API sometimes returns content as string, sometimes as object
-        val content = when {
-            contentRaw == null || contentRaw.isJsonNull -> ""
-            contentRaw.isJsonPrimitive -> contentRaw.asString
-            else -> contentRaw.toString()
+        var content = ""
+        if (contentRaw != null && !contentRaw.isJsonNull) {
+            if (contentRaw.isJsonPrimitive) {
+                val rawStr = contentRaw.asString
+                val decoded = tryDecodeGzip(rawStr)
+                content = decoded ?: rawStr
+            } else {
+                content = contentRaw.toString()
+            }
         }
 
-        val metadataObj = obj.get("metadata")
-        val metadata = if (metadataObj == null || metadataObj.isJsonNull) {
-            NotificationMetadata(null, null, null, null)
-        } else {
-            parseMetadata(metadataObj.asJsonObject)
+        val metaElement = obj.get("metadata")
+        val metadata = when {
+            metaElement == null || metaElement.isJsonNull -> {
+                extractMetadata(content)
+            }
+            metaElement.isJsonObject -> {
+                parseMetadata(metaElement.asJsonObject, content)
+            }
+            metaElement.isJsonPrimitive -> {
+                val metaStr = metaElement.asString
+                val decoded = tryDecodeGzip(metaStr)
+                if (decoded != null) {
+                    try {
+                        val metaObj = gson.fromJson(decoded, JsonObject::class.java)
+                        parseMetadata(metaObj, content)
+                    } catch (e: Exception) {
+                        extractMetadata(content)
+                    }
+                } else {
+                    extractMetadata(content)
+                }
+            }
+            else -> extractMetadata(content)
         }
 
         return Notification(id, content, metadata)
     }
 
-    private fun parseMetadata(obj: JsonObject): NotificationMetadata {
-        val issueId = obj.get("issueId")?.asString
+    // Get metadata when API doesn't give it to us
+    private fun extractMetadata(content: String): NotificationMetadata {
+        val issueIdRegex = Regex("""([A-Z]+-\d+)""")
+        val issueId = issueIdRegex.find(content)?.groupValues?.get(1)
+
+        val titleRegex = Regex("""[A-Z]+-\d+\s+(.+?)(?:\n|<)""")
+        val title = titleRegex.find(content)?.groupValues?.get(1)?.trim()
+
+        // Try to find state/status
+        val statusRegex = Regex("""State:\s*(\w+)""", RegexOption.IGNORE_CASE)
+        val status = statusRegex.find(content)?.groupValues?.get(1)
+
+        return NotificationMetadata(issueId, title, status, content)
+    }
+
+    private fun parseMetadata(obj: JsonObject, content: String = ""): NotificationMetadata {
+        // Try to extract readable ID from content first (e.g., DEMO-35)
+        val readableIdFromContent = if (content.isNotBlank()) {
+            val issueIdRegex = Regex("""([A-Z]+-\d+)""")
+            issueIdRegex.find(content)?.groupValues?.get(1)
+        } else null
+        
+        // Use readable ID from content, fallback to metadata issueId
+        val issueId = readableIdFromContent ?: obj.get("issueId")?.asString
         val issueTitle = obj.get("issueTitle")?.asString
         val issueStatus = obj.get("issueStatus")?.asString
-        
-        // Description comes base64+gzipped for some reason
+
+        var description: String? = null
         val descRaw = obj.get("description")?.asString
-        val description = if (descRaw != null) {
-            try {
-                val decoded = Base64.getDecoder().decode(descRaw)
-                GZIPInputStream(ByteArrayInputStream(decoded))
-                    .bufferedReader()
-                    .use { it.readText() }
-            } catch (e: Exception) {
-                descRaw // fallback
-            }
-        } else {
-            null
+        if (descRaw != null) {
+            description = tryDecodeGzip(descRaw) ?: descRaw
         }
 
         return NotificationMetadata(issueId, issueTitle, issueStatus, description)
     }
 
+    private fun tryDecodeGzip(value: String): String? {
+        try {
+            val decoded = Base64.getDecoder().decode(value)
+            val result = GZIPInputStream(ByteArrayInputStream(decoded))
+                .bufferedReader()
+                .use { it.readText() }
+            return result
+        } catch (e: Exception) {
+            return null
+        }
+    }
+
     fun getRecentIssues(sinceTimestamp: Long): List<Issue> {
-        val url = "${baseUrl.trimEnd('/')}/api/issues?fields=id,summary,description,updated,customFields(name,value(name))&\$top=50"
+        val url = "${baseUrl.trimEnd('/')}/api/issues?fields=id,idReadable,summary,description,updated,customFields(name,value(name))&\$top=50"
 
         val request = Request.Builder()
             .url(url)
@@ -109,38 +157,44 @@ class YouTrackClient(
             .build()
 
         val response = client.newCall(request).execute()
-        
         if (!response.isSuccessful) {
-            throw IllegalStateException("YouTrack returned ${response.code}")
+            throw IllegalStateException("YouTrack API error: ${response.code}")
         }
 
-        val body = response.body?.string() ?: return emptyList()
-        val root = gson.fromJson(body, JsonElement::class.java)
+        val body = response.body?.string()
+        if (body == null) return emptyList()
 
+        val root = gson.fromJson(body, JsonElement::class.java)
         if (!root.isJsonArray) return emptyList()
 
         val issues = mutableListOf<Issue>()
-        
+
         for (element in root.asJsonArray) {
             if (!element.isJsonObject) continue
 
             val obj = element.asJsonObject
-            val id = obj.get("id")?.asString ?: continue
+            
+            // Use idReadable (e.g., DEMO-35) instead of internal id (e.g., 3-45)
+            val idReadable = obj.get("idReadable")?.asString
+            val id = idReadable ?: obj.get("id")?.asString
+            if (id == null) continue
+
+            val updated = obj.get("updated")?.asLong
+            if (updated == null || updated <= sinceTimestamp) continue
+
             val summary = obj.get("summary")?.asString ?: ""
             val description = obj.get("description")?.asString
-            val updated = obj.get("updated")?.asLong ?: continue
 
-            // Skip old issues
-            if (updated <= sinceTimestamp) continue
-
-            // Extract State custom field
+            // Find State field
             var state: String? = null
             val customFields = obj.getAsJsonArray("customFields")
             if (customFields != null) {
                 for (field in customFields) {
                     val fieldObj = field.asJsonObject
-                    if (fieldObj.get("name")?.asString == "State") {
-                        state = fieldObj.getAsJsonObject("value")?.get("name")?.asString
+                    val fieldName = fieldObj.get("name")?.asString
+                    if (fieldName == "State") {
+                        val valueObj = fieldObj.getAsJsonObject("value")
+                        state = valueObj?.get("name")?.asString
                         break
                     }
                 }
@@ -148,20 +202,22 @@ class YouTrackClient(
 
             issues.add(Issue(id, summary, description, state))
         }
-        
+
         return issues
     }
 
     fun createIssue(projectId: String, summary: String, description: String? = null): String {
         val url = "${baseUrl.trimEnd('/')}/api/issues?fields=id,idReadable"
 
-        // Build JSON manually
-        var jsonBody = "{\"project\":{\"id\":\"$projectId\"},\"summary\":\"${escapeJson(summary)}\""
-        if (!description.isNullOrBlank()) {
-            jsonBody += ",\"description\":\"${escapeJson(description)}\""
+        val payload = mutableMapOf<String, Any>(
+            "project" to mapOf("id" to projectId),
+            "summary" to summary
+        )
+        if (description != null) {
+            payload["description"] = description
         }
-        jsonBody += "}"
 
+        val jsonBody = gson.toJson(payload)
         val requestBody = jsonBody.toRequestBody("application/json".toMediaType())
 
         val request = Request.Builder()
@@ -169,27 +225,22 @@ class YouTrackClient(
             .post(requestBody)
             .addHeader("Authorization", "Bearer $token")
             .addHeader("Accept", "application/json")
-            .addHeader("Content-Type", "application/json")
             .build()
 
         val response = client.newCall(request).execute()
-        
         if (!response.isSuccessful) {
             throw IllegalStateException("Failed to create issue: ${response.code}")
         }
 
-        val body = response.body?.string() ?: throw IllegalStateException("Empty response")
-        val root = gson.fromJson(body, JsonObject::class.java)
-        
-        return root.get("idReadable")?.asString 
-            ?: root.get("id")?.asString 
-            ?: "CREATED"
-    }
+        val body = response.body?.string()
+        if (body == null) throw IllegalStateException("Empty response")
 
-    private fun escapeJson(text: String): String = text
-        .replace("\\", "\\\\")
-        .replace("\"", "\\\"")
-        .replace("\n", "\\n")
-        .replace("\r", "\\r")
-        .replace("\t", "\\t")
+        val root = gson.fromJson(body, JsonObject::class.java)
+
+        val idReadable = root.get("idReadable")?.asString
+        if (idReadable != null) return idReadable
+
+        val idFallback = root.get("id")?.asString
+        return idFallback ?: "CREATED"
+    }
 }
