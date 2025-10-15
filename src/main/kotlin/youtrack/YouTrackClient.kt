@@ -56,7 +56,10 @@ class YouTrackClient(
         if (!element.isJsonObject) return null
 
         val obj = element.asJsonObject
-        val id = obj.get("id")?.asString ?: return null
+        val idElement = obj.get("id")
+        val id = if (idElement != null && !idElement.isJsonNull) {
+            idElement.asString
+        } else return null
 
         // content might be base64+gzip encoded
         val contentRaw = obj.get("content")
@@ -122,12 +125,27 @@ class YouTrackClient(
         } else null
         
         // Use readable ID from content, fallback to metadata issueId
-        val issueId = readableIdFromContent ?: obj.get("issueId")?.asString
-        val issueTitle = obj.get("issueTitle")?.asString
-        val issueStatus = obj.get("issueStatus")?.asString
+        val issueIdElement = obj.get("issueId")
+        val metadataIssueId = if (issueIdElement != null && !issueIdElement.isJsonNull) {
+            issueIdElement.asString
+        } else null
+        val issueId = readableIdFromContent ?: metadataIssueId
+        
+        val issueTitleElement = obj.get("issueTitle")
+        val issueTitle = if (issueTitleElement != null && !issueTitleElement.isJsonNull) {
+            issueTitleElement.asString
+        } else null
+        
+        val issueStatusElement = obj.get("issueStatus")
+        val issueStatus = if (issueStatusElement != null && !issueStatusElement.isJsonNull) {
+            issueStatusElement.asString
+        } else null
 
         var description: String? = null
-        val descRaw = obj.get("description")?.asString
+        val descElement = obj.get("description")
+        val descRaw = if (descElement != null && !descElement.isJsonNull) {
+            descElement.asString
+        } else null
         if (descRaw != null) {
             description = tryDecodeGzip(descRaw) ?: descRaw
         }
@@ -175,15 +193,29 @@ class YouTrackClient(
             val obj = element.asJsonObject
             
             // Use idReadable (e.g., DEMO-35) instead of internal id (e.g., 3-45)
-            val idReadable = obj.get("idReadable")?.asString
-            val id = idReadable ?: obj.get("id")?.asString
+            val idReadableElement = obj.get("idReadable")
+            val idReadable = if (idReadableElement != null && !idReadableElement.isJsonNull) {
+                idReadableElement.asString
+            } else null
+            
+            val idElement = obj.get("id")
+            val id = idReadable ?: if (idElement != null && !idElement.isJsonNull) {
+                idElement.asString
+            } else null
             if (id == null) continue
 
             val updated = obj.get("updated")?.asLong
             if (updated == null || updated <= sinceTimestamp) continue
 
-            val summary = obj.get("summary")?.asString ?: ""
-            val description = obj.get("description")?.asString
+            val summaryElement = obj.get("summary")
+            val summary = if (summaryElement != null && !summaryElement.isJsonNull) {
+                summaryElement.asString
+            } else ""
+            
+            val descriptionElement = obj.get("description")
+            val description = if (descriptionElement != null && !descriptionElement.isJsonNull) {
+                descriptionElement.asString
+            } else null
 
             // Find State field
             var state: String? = null
@@ -191,10 +223,19 @@ class YouTrackClient(
             if (customFields != null) {
                 for (field in customFields) {
                     val fieldObj = field.asJsonObject
-                    val fieldName = fieldObj.get("name")?.asString
+                    val fieldNameElement = fieldObj.get("name")
+                    val fieldName = if (fieldNameElement != null && !fieldNameElement.isJsonNull) {
+                        fieldNameElement.asString
+                    } else null
+                    
                     if (fieldName == "State") {
                         val valueObj = fieldObj.getAsJsonObject("value")
-                        state = valueObj?.get("name")?.asString
+                        if (valueObj != null) {
+                            val stateNameElement = valueObj.get("name")
+                            state = if (stateNameElement != null && !stateNameElement.isJsonNull) {
+                                stateNameElement.asString
+                            } else null
+                        }
                         break
                     }
                 }
@@ -237,10 +278,16 @@ class YouTrackClient(
 
         val root = gson.fromJson(body, JsonObject::class.java)
 
-        val idReadable = root.get("idReadable")?.asString
+        val idReadableElement = root.get("idReadable")
+        val idReadable = if (idReadableElement != null && !idReadableElement.isJsonNull) {
+            idReadableElement.asString
+        } else null
         if (idReadable != null) return idReadable
 
-        val idFallback = root.get("id")?.asString
+        val idElement = root.get("id")
+        val idFallback = if (idElement != null && !idElement.isJsonNull) {
+            idElement.asString
+        } else null
         return idFallback ?: "CREATED"
     }
 }
